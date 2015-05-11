@@ -29,6 +29,10 @@
 // Copyright (C) 2012 Tobias Koenig <tokoe@kdab.com>
 // Copyright (C) 2013 Peter Breitenlohner <peb@mppmu.mpg.de>
 // Copyright (C) 2013 Adrian Johnson <ajohnson@redneon.com>
+// Copyright (C) 2014 Marek Kasik <mkasik@redhat.com>
+// Copyright (C) 2014 Jiri Slaby <jirislaby@gmail.com>
+// Copyright (C) 2014 Anuj Khare <khareanuj18@gmail.com>
+// Copyright (C) 2015 Petr Gajdos <pgajdos@suse.cz>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -1042,14 +1046,24 @@ AnnotAppearanceCharacs::AnnotAppearanceCharacs(Dict *dict) {
   obj1.free();
 
   if (dict->lookup("BC", &obj1)->isArray()) {
-    borderColor = new AnnotColor(obj1.getArray());
+    Array *colorComponents = obj1.getArray();
+    if (colorComponents->getLength() > 0) {
+      borderColor = new AnnotColor(colorComponents);
+    } else {
+      borderColor = NULL;
+    }
   } else {
     borderColor = NULL;
   }
   obj1.free();
 
   if (dict->lookup("BG", &obj1)->isArray()) {
-    backColor = new AnnotColor(obj1.getArray());
+    Array *colorComponents = obj1.getArray();
+    if (colorComponents->getLength() > 0) {
+      backColor = new AnnotColor(colorComponents);
+    } else {
+      backColor = NULL;
+    }
   } else {
     backColor = NULL;
   }
@@ -1264,7 +1278,7 @@ void Annot::initialize(PDFDoc *docA, Dict *dict) {
   if (dict->lookup("Contents", &obj1)->isString()) {
     contents = obj1.getString()->copy();
   } else {
-    contents = NULL;
+    contents = new GooString();
   }
   obj1.free();
 
@@ -1640,9 +1654,7 @@ Annot::~Annot() {
   annotObj.free();
   
   delete rect;
-  
-  if (contents)
-    delete contents;
+  delete contents;
 
   if (name)
     delete name;
@@ -3014,6 +3026,8 @@ void AnnotFreeText::generateFreeTextAppearance()
     fontsize = 10;
   if (fontcolor == NULL)
     fontcolor = new AnnotColor(0, 0, 0); // Black
+  if (!contents)
+    contents = new GooString ();
 
   // Draw box
   GBool doFill = (color && color->getSpace() != AnnotColor::colorTransparent);
@@ -3706,6 +3720,7 @@ void AnnotTextMarkup::setQuadrilaterals(AnnotQuadrilaterals *quadPoints) {
     obj1.arrayAdd (obj2.initReal (quadPoints->getY4(i)));
   }
 
+  delete quadrilaterals;
   quadrilaterals = new AnnotQuadrilaterals(obj1.getArray(), rect);
 
   annotObj.dictSet ("QuadPoints", &obj1);
@@ -4085,7 +4100,7 @@ void Annot::layoutText(GooString *text, GooString *outBuf, int *i,
         // This assumes an identity CMap.
         outBuf->append((uChar >> 8) & 0xff);
         outBuf->append(uChar & 0xff);
-      } else if (ccToUnicode->mapToCharCode(&uChar, &c, 1)) {
+      } else if (ccToUnicode->mapToCharCode(&uChar, &c, 2)) {
         ccToUnicode->decRefCnt();
         if (font->isCIDFont()) {
           // TODO: This assumes an identity CMap.  It should be extended to
@@ -4925,7 +4940,8 @@ void AnnotWidget::drawFormFieldButton(GfxResources *resources, GooString *da) {
   switch (static_cast<FormFieldButton *>(field)->getButtonType()) {
   case formButtonRadio: {
     //~ Acrobat doesn't draw a caption if there is no AP dict (?)
-    if (appearState && appearState->cmp("Off") != 0) {
+    if (appearState && appearState->cmp("Off") != 0 &&
+        static_cast<FormFieldButton *>(field)->getState(appearState->getCString())) {
       if (caption) {
         drawText(caption, da, resources, gFalse, 0, fieldQuadCenter,
                  gFalse, gTrue);

@@ -14,7 +14,7 @@
 // under GPL version 2 or later
 //
 // Copyright (C) 2005 Kristian Høgsberg <krh@redhat.com>
-// Copyright (C) 2005-2013 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2005-2013, 2015 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2005 Jeff Muizelaar <jrmuizel@nit.ca>
 // Copyright (C) 2005 Jonathan Blandford <jrb@redhat.com>
 // Copyright (C) 2005 Marco Pesenti Gritti <mpg@redhat.com>
@@ -30,6 +30,7 @@
 // Copyright (C) 2013 Adrian Perez de Castro <aperez@igalia.com>
 // Copyright (C) 2013 Adrian Johnson <ajohnson@redneon.com>
 // Copyright (C) 2013 José Aliste <jaliste@src.gnome.org>
+// Copyright (C) 2014 Ed Porras <ed@moto-research.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -731,7 +732,7 @@ GBool NameTree::lookup(GooString *name, Object *obj)
     (*entry)->value.fetch(xref, obj);
     return gTrue;
   } else {
-    printf("failed to look up %s\n", name->getCString());
+    error(errSyntaxError, -1, "failed to look up ({0:s})", name->getCString());
     obj->initNull();
     return gFalse;
   }
@@ -806,7 +807,6 @@ int Catalog::getNumPages()
       return 0;
     }
     catDict.dictLookup("Pages", &pagesDict);
-    catDict.free();
 
     // This should really be isDict("Pages"), but I've seen at least one
     // PDF file where the /Type entry is missing.
@@ -814,19 +814,47 @@ int Catalog::getNumPages()
       error(errSyntaxError, -1, "Top-level pages object is wrong type ({0:s})",
           pagesDict.getTypeName());
       pagesDict.free();
+      catDict.free();
       return 0;
     }
 
     pagesDict.dictLookup("Count", &obj);
     // some PDF files actually use real numbers here ("/Count 9.0")
     if (!obj.isNum()) {
-      error(errSyntaxError, -1, "Page count in top-level pages object is wrong type ({0:s})",
-         obj.getTypeName());
-      numPages = 0;
+      if (pagesDict.dictIs("Page")) {
+	Object pageRootRef;
+	catDict.dictLookupNF("Pages", &pageRootRef);
+
+	error(errSyntaxError, -1, "Pages top-level is a single Page. The document is mal-formet, trying to recover...");
+
+	Dict *pageDict = pagesDict.getDict();
+	const Ref pageRef = pageRootRef.getRef();
+	Page *p = new Page(doc, 1, pageDict, pageRef, new PageAttrs(NULL, pageDict), form);
+	if (p->isOk()) {
+	  pages = (Page **)gmallocn(1, sizeof(Page *));
+	  pageRefs = (Ref *)gmallocn(1, sizeof(Ref));
+
+	  pages[0] = p;
+	  pageRefs[0].num = pageRef.num;
+	  pageRefs[0].gen = pageRef.gen;
+
+	  numPages = 1;
+	  lastCachedPage = 1;
+	  pagesSize = 1;
+	} else {
+	  delete p;
+	  numPages = 0;
+	}
+      } else {
+	error(errSyntaxError, -1, "Page count in top-level pages object is wrong type ({0:s})",
+	  obj.getTypeName());
+	numPages = 0;
+      }
     } else {
       numPages = (int)obj.getNum();
     }
 
+    catDict.free();
     obj.free();
     pagesDict.free();
   }
